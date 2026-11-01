@@ -260,6 +260,17 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
     var showCalendar by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showBriefstudioLogin by remember { mutableStateOf(false) }
+    var connectionEstablished by remember { mutableStateOf(BriefstudioTransfer.isConnected(context)) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(connectionEstablished) {
+        if (connectionEstablished) {
+            BriefstudioNotificationWorker.schedule(context)
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
     var selectedEntry by rememberSaveable { mutableStateOf<Long?>(null) }
     var editTextId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -395,7 +406,22 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                 showSettings -> SettingsPage(repo, security,
                     onBackup = { backup.launch("MemoraSolo_${repo.today()}.zip") },
                     onRestore = { restore.launch(arrayOf("application/zip", "application/octet-stream")) },
-                    onBriefstudioImport = { showBriefstudioLogin = true })
+                    onBriefstudioImport = {
+                        if (BriefstudioTransfer.isConnected(context)) {
+                            scope.launch {
+                                busy = true
+                                try {
+                                    val incoming = BriefstudioTransfer.fetchSaved(context)
+                                    var imported = 0
+                                    for (document in incoming) if (repo.importBriefstudio(document)) imported++
+                                    message = if (imported > 0) "$imported neue Texte übernommen. Im Kalender ansehen."
+                                        else "Synchronisiert: Keine neuen Texte."
+                                } catch (e: Exception) { error(e) }
+                                finally { busy = false }
+                            }
+                        } else showBriefstudioLogin = true
+                    },
+                    briefstudioConnected = connectionEstablished)
                 showCalendar -> CalendarPage(selectedDate, savedDates.toSet(), onPick = { selectedDate = it; showCalendar = false; selectedEntry = null })
                 selectedEntry != null -> EntryPage(repo, selectedEntry!!,
                     onEditText = { editTextId = it },
@@ -434,6 +460,7 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                     for (document in incoming) {
                         if (repo.importBriefstudio(document)) imported++ else skipped++
                     }
+                    connectionEstablished = true
                     message = "Briefstudio verbunden. $imported übernommen, $skipped bereits vorhanden. Neue Texte werden beim Entsperren automatisch geholt."
                 } catch (e: Exception) { error(e) }
                 finally { busy = false }
@@ -934,7 +961,7 @@ private fun EntryTimeDialog(entry: Entry, onDismiss: () -> Unit, onSave: (String
 
 @Composable
 private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBackup: () -> Unit, onRestore: () -> Unit,
-    onBriefstudioImport: () -> Unit) {
+    onBriefstudioImport: () -> Unit, briefstudioConnected: Boolean) {
     var changePattern by remember { mutableStateOf(false) }
     var changePin by remember { mutableStateOf(false) }
     var newPin by remember { mutableStateOf("") }
@@ -947,9 +974,9 @@ private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBac
         OutlinedButton(onClick = onBriefstudioImport, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.CloudDownload, null)
             Spacer(Modifier.width(8.dp))
-            Text("Briefstudio verbinden / synchronisieren")
+            Text(if (briefstudioConnected) "Briefstudio: Jetzt synchronisieren" else "Einmalig mit Briefstudio verbinden")
         }
-        Text("Einmal anmelden; dein Passwort wird nicht gespeichert. Bereits importierte Dokumente werden nicht verdoppelt.", color = Muted, fontSize = 12.sp)
+        Text(if (briefstudioConnected) "Verbunden. Keine erneute Anmeldung nötig. Neue Inhalte werden beim Entsperren übernommen; im Hintergrund wird ungefähr alle 15 Minuten geprüft (Android kann verzögern)." else "Einmal anmelden; dein Passwort wird nicht gespeichert. Bereits importierte Dokumente werden nicht verdoppelt.", color = Muted, fontSize = 12.sp)
         Button(onClick = onBackup, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.Save, null); Spacer(Modifier.width(8.dp)); Text("Vollständige Sicherung erstellen")
         }
