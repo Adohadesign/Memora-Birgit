@@ -59,11 +59,17 @@ class DiaryRepository(private val context: Context) {
         if (dao.importedCount(document.id) > 0) return@withTransaction false
         val day = LocalDate.parse(document.date).toString()
         val time = LocalTime.parse(document.time).format(DateTimeFormatter.ofPattern("HH:mm"))
-        val entryId = dao.insertEntry(Entry(entryDate = day, displayTime = time, isOpen = false))
-        val text = if (document.title.isBlank()) document.body else "${document.title}\n\n${document.body}"
+        val entryId = dao.insertEntry(Entry(entryDate = day, displayTime = time, title = document.title.trim().ifBlank { document.body.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(85) ?: "Übertragener Text" }, isOpen = false))
+        val text = document.body
         dao.insertElement(DiaryElement(entryId = entryId, type = "TEXT", position = 1, text = text))
         check(dao.recordImport(ImportedBriefstudioDocument(document.id, entryId)) != -1L) { "Import bereits vorhanden" }
         true
+    }
+
+    suspend fun renameEntry(entryId: Long, title: String) {
+        val normalized = title.trim().take(120)
+        require(normalized.isNotBlank()) { "Bitte eine Überschrift eingeben." }
+        dao.setEntryTitle(entryId, normalized)
     }
 
     suspend fun saveText(elementId: Long, text: String) {
