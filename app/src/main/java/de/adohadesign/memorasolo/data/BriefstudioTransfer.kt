@@ -90,14 +90,29 @@ object BriefstudioTransfer {
         val documents = mutableListOf<BriefstudioDocument>()
         var offset = 0
         while (true) {
-            val response = JSONArray(request("/rest/v1/bs_documents?select=id,title,body,diary_date,diary_time&transfer_ready=eq.true&order=created_at.asc&limit=200&offset=$offset", token = accessToken))
+            val response = JSONArray(request("/rest/v1/bs_documents?select=id,title,body,assets,diary_date,diary_time&transfer_ready=eq.true&order=created_at.asc&limit=200&offset=$offset", token = accessToken))
             for (i in 0 until response.length()) {
                 val item = response.getJSONObject(i)
+                // Letter documents can contain text solely in freely placed textboxes.
+                // Keep the original body unchanged and append those separate text elements.
                 val body = item.optString("body", "")
+                val assets = item.optJSONArray("assets")
+                val textboxes = mutableListOf<String>()
+                if (assets != null) {
+                    for (assetIndex in 0 until assets.length()) {
+                        val asset = assets.optJSONObject(assetIndex) ?: continue
+                        if (asset.optString("kind") == "textbox") {
+                            val textbox = asset.optString("text", "").trim()
+                            if (textbox.isNotBlank()) textboxes.add(textbox)
+                        }
+                    }
+                }
+                val combinedBody = (listOf(body.trim()) + textboxes)
+                    .filter { it.isNotBlank() }.joinToString("\\n\\n")
                 val date = item.optString("diary_date", "")
                 val time = item.optString("diary_time", "")
-                if (body.isNotBlank() && date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && time.isNotBlank()) {
-                    documents.add(BriefstudioDocument(item.getString("id"), item.optString("title", ""), body, date, time.take(5)))
+                if (combinedBody.isNotBlank() && date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && time.isNotBlank()) {
+                    documents.add(BriefstudioDocument(item.getString("id"), item.optString("title", ""), combinedBody, date, time.take(5)))
                 }
             }
             if (response.length() < 200) break
