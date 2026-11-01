@@ -259,6 +259,7 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
     var selectedDate by rememberSaveable { mutableStateOf(repo.today()) }
     var showCalendar by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showBriefstudioLogin by remember { mutableStateOf(false) }
     var selectedEntry by rememberSaveable { mutableStateOf<Long?>(null) }
     var editTextId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -278,6 +279,19 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
     val entries by entryFlow.collectAsState(initial = emptyList())
     val savedDates by repo.dates().collectAsState(initial = emptyList())
     fun error(t: Throwable) { message = t.message ?: "Unbekannter Fehler" }
+    // Only sync after an unlock; offline diary features remain available without internet.
+    LaunchedEffect(unlocked) {
+        if (unlocked && BriefstudioTransfer.isConnected(context)) {
+            try {
+                val incoming = BriefstudioTransfer.fetchSaved(context)
+                var imported = 0
+                for (document in incoming) if (repo.importBriefstudio(document)) imported++
+                if (imported > 0) message = "$imported neue(r) Text(e) aus Briefstudio übernommen. Über den Kalender öffnen."
+            } catch (e: Exception) {
+                message = "Briefstudio konnte nicht synchronisiert werden: ${e.message ?: "Verbindung prüfen"}"
+            }
+        }
+    }
     fun newCaptureUri(video: Boolean = false): Uri {
         val dir = File(context.cacheDir, "capture").also { it.mkdirs() }
         val file = File(dir, "capture_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.${if (video) "mp4" else "jpg"}")
@@ -380,7 +394,8 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                 editTextId != null -> TextEditor(repo, editTextId!!, onBack = { editTextId = null })
                 showSettings -> SettingsPage(repo, security,
                     onBackup = { backup.launch("MemoraSolo_${repo.today()}.zip") },
-                    onRestore = { restore.launch(arrayOf("application/zip", "application/octet-stream")) })
+                    onRestore = { restore.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    onBriefstudioImport = { showBriefstudioLogin = true })
                 showCalendar -> CalendarPage(selectedDate, savedDates.toSet(), onPick = { selectedDate = it; showCalendar = false; selectedEntry = null })
                 selectedEntry != null -> EntryPage(repo, selectedEntry!!,
                     onEditText = { editTextId = it },
@@ -406,6 +421,24 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                 selectedDate = repo.today(); selectedEntry = null; editTextId = null; showCalendar = false; showSettings = false
             }, icon = { Icon(Icons.Default.Today, "Jetzt") }, label = { Text("Jetzt") })
         }
+    }
+    if (showBriefstudioLogin) {
+        BriefstudioLoginDialog(onDismiss = { showBriefstudioLogin = false }, onImport = { email, password ->
+            showBriefstudioLogin = false
+            scope.launch {
+                busy = true
+                try {
+                    val incoming = BriefstudioTransfer.connectAndFetch(context, email, password)
+                    var imported = 0
+                    var skipped = 0
+                    for (document in incoming) {
+                        if (repo.importBriefstudio(document)) imported++ else skipped++
+                    }
+                    message = "Briefstudio verbunden. $imported übernommen, $skipped bereits vorhanden. Neue Texte werden beim Entsperren automatisch geholt."
+                } catch (e: Exception) { error(e) }
+                finally { busy = false }
+            }
+        })
     }
     if (showAdd) AlertDialog(onDismissRequest = { showAdd = false }, title = { Text("Inhalt hinzufügen") }, text = {
         Column {
@@ -900,7 +933,8 @@ private fun EntryTimeDialog(entry: Entry, onDismiss: () -> Unit, onSave: (String
 }
 
 @Composable
-private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBackup: () -> Unit, onRestore: () -> Unit) {
+private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBackup: () -> Unit, onRestore: () -> Unit,
+    onBriefstudioImport: () -> Unit) {
     var changePattern by remember { mutableStateOf(false) }
     var changePin by remember { mutableStateOf(false) }
     var newPin by remember { mutableStateOf("") }
@@ -909,7 +943,13 @@ private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBac
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Datensicherung", color = Gold, fontWeight = FontWeight.SemiBold)
-        Text("Nur manuelle Sicherungen. Keine Cloud und keine automatische Übertragung.", color = Muted)
+        Text("Dein Tagebuch bleibt lokal. Nur freigegebene Texte aus Briefstudio werden heruntergeladen.", color = Muted)
+        OutlinedButton(onClick = onBriefstudioImport, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.CloudDownload, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Briefstudio verbinden / synchronisieren")
+        }
+        Text("Einmal anmelden; dein Passwort wird nicht gespeichert. Bereits importierte Dokumente werden nicht verdoppelt.", color = Muted, fontSize = 12.sp)
         Button(onClick = onBackup, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.Save, null); Spacer(Modifier.width(8.dp)); Text("Vollständige Sicherung erstellen")
         }
@@ -950,4 +990,22 @@ private fun SettingsPage(repo: DiaryRepository, security: PatternSecurity, onBac
         }) { Text("Speichern") } }, dismissButton = { TextButton(onClick = { changePin = false }) { Text("Abbrechen") } })
     if (message.isNotBlank()) AlertDialog(onDismissRequest = { message = "" }, title = { Text("Hinweis") },
         text = { Text(message) }, confirmButton = { TextButton(onClick = { message = "" }) { Text("OK") } })
+}
+
+@Composable
+private fun BriefstudioLoginDialog(onDismiss: () -> Unit, onImport: (String, String) -> Unit) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Briefstudio verbinden") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Einmal anmelden. Danach werden freigegebene Texte beim Entsperren automatisch mit dem ausgewählten Datum und der Uhrzeit übernommen.")
+                OutlinedTextField(email, { email = it }, label = { Text("Briefstudio-E-Mail") }, singleLine = true)
+                OutlinedTextField(password, { password = it }, label = { Text("Briefstudio-Passwort") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), singleLine = true)
+                Text("Fotos und das gestaltete Briefpapier werden noch nicht übertragen.", color = Muted, fontSize = 12.sp)
+            }
+        },
+        confirmButton = { TextButton(enabled = email.isNotBlank() && password.isNotBlank(), onClick = { onImport(email, password); password = "" }) { Text("Verbinden") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } })
 }
