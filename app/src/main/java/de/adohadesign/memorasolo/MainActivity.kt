@@ -981,7 +981,7 @@ private fun TextEditor(repo: DiaryRepository, elementId: Long, onBack: () -> Uni
         }, onState = { status = it })
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) { controller.start(); listening = true; paused = false }
+        if (granted) { listening = controller.start(); paused = false }
         else status = "Mikrofonberechtigung verweigert"
     }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
