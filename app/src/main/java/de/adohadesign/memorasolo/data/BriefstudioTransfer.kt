@@ -108,7 +108,7 @@ object BriefstudioTransfer {
                     }
                 }
                 val combinedBody = (listOf(body.trim()) + textboxes)
-                    .filter { it.isNotBlank() }.joinToString("\\n\\n")
+                    .filter { it.isNotBlank() }.joinToString("\n\n")
                 val date = item.optString("diary_date", "")
                 val time = item.optString("diary_time", "")
                 if (combinedBody.isNotBlank() && date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && time.isNotBlank()) {
