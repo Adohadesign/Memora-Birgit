@@ -9,6 +9,7 @@ data class Entry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val entryDate: String,
     val displayTime: String,
+    val title: String = "Eintrag",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val isOpen: Boolean = true
@@ -100,6 +101,8 @@ interface DiaryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun recordImport(item: ImportedBriefstudioDocument): Long
     @Update suspend fun updateEntry(entry: Entry)
+    @Query("UPDATE entries SET title = :title, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setEntryTitle(id: Long, title: String, updatedAt: Long = System.currentTimeMillis())
     @Update suspend fun updateElement(element: DiaryElement)
     @Query("UPDATE entries SET isOpen = 0 WHERE isOpen = 1")
     suspend fun closeOpenEntries()
@@ -109,7 +112,7 @@ interface DiaryDao {
     suspend fun deleteEntry(id: Long)
 }
 
-@Database(entities = [Entry::class, DiaryElement::class, FileAsset::class, ImportedBriefstudioDocument::class], version = 2, exportSchema = true)
+@Database(entities = [Entry::class, DiaryElement::class, FileAsset::class, ImportedBriefstudioDocument::class], version = 3, exportSchema = true)
 abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
     companion object {
@@ -118,10 +121,15 @@ abstract class DiaryDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `imported_briefstudio_documents` (`documentId` TEXT NOT NULL, `entryId` INTEGER NOT NULL, `importedAt` INTEGER NOT NULL, PRIMARY KEY(`documentId`))")
             }
         }
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE entries ADD COLUMN title TEXT NOT NULL DEFAULT 'Eintrag'")
+            }
+        }
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "memora.db")
-                .addMigrations(MIGRATION_1_2).build().also { instance = it }
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }
