@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var archive: ArchiveManager
     private var unlocked by mutableStateOf(false)
     private var pendingMode by mutableStateOf("")
+    private var pendingBriefstudioId by mutableStateOf<String?>(null)
     private var hasStarted = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,6 +97,7 @@ class MainActivity : ComponentActivity() {
         security = PatternSecurity(this)
         archive = ArchiveManager(this, repository)
         pendingMode = intent.getStringExtra("start_mode") ?: ""
+        pendingBriefstudioId = intent.getStringExtra("briefstudio_document_id")
         addShortcuts()
         window.statusBarColor = android.graphics.Color.rgb(16, 18, 24)
         window.navigationBarColor = android.graphics.Color.rgb(16, 18, 24)
@@ -105,7 +107,9 @@ class MainActivity : ComponentActivity() {
                     // Keep activity-result launchers registered while the unlock overlay is shown.
                     Box(Modifier.fillMaxSize()) {
                         Box(Modifier.fillMaxSize().then(if (!unlocked) Modifier.alpha(0f).semantics { invisibleToUser() } else Modifier)) {
-                            MemoraHome(repository, security, archive, unlocked, pendingMode) { pendingMode = "" }
+                            MemoraHome(repository, security, archive, unlocked, pendingMode, pendingBriefstudioId,
+                                onShortcutConsumed = { pendingMode = "" },
+                                onNotificationConsumed = { pendingBriefstudioId = null })
                         }
                         if (!unlocked) Box(Modifier.fillMaxSize().background(Back)) {
                             AccessScreen(security) { unlocked = true }
@@ -253,7 +257,8 @@ private fun PatternPad(onPattern: (String) -> Unit) {
 
 @Composable
 private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive: ArchiveManager,
-    unlocked: Boolean, shortcutMode: String, onShortcutConsumed: () -> Unit) {
+    unlocked: Boolean, shortcutMode: String, briefstudioNotificationId: String?,
+    onShortcutConsumed: () -> Unit, onNotificationConsumed: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selectedDate by rememberSaveable { mutableStateOf(repo.today()) }
@@ -298,11 +303,39 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
             try {
                 val incoming = BriefstudioTransfer.fetchSaved(context)
                 var imported = 0
-                for (document in incoming) if (repo.importBriefstudio(document)) imported++
+                for (document in incoming) if (repo.importBriefstudio(document)) {
+                    imported++
+                    BriefstudioNotificationWorker.notifyImported(context, document)
+                }
                 if (imported > 0) message = "$imported neue(r) Text(e) aus Briefstudio übernommen. Über den Kalender öffnen."
             } catch (e: Exception) {
                 message = "Briefstudio konnte nicht synchronisiert werden: ${e.message ?: "Verbindung prüfen"}"
             }
+        }
+    }
+    LaunchedEffect(unlocked, briefstudioNotificationId) {
+        if (unlocked && briefstudioNotificationId != null) {
+            // Sync runs separately on unlock. Resolve the stable mapping after it completes,
+            // allowing the import to finish before opening the day entry.
+            val targetId = briefstudioNotificationId
+            repeat(12) {
+                val entryId = repo.dao.importedEntryId(targetId)
+                if (entryId != null) {
+                    val entry = repo.dao.entry(entryId)
+                    if (entry != null) {
+                        selectedDate = entry.entryDate
+                        selectedEntry = entryId
+                        showCalendar = false
+                        showSettings = false
+                        editTextId = null
+                        onNotificationConsumed()
+                        return@LaunchedEffect
+                    }
+                }
+                kotlinx.coroutines.delay(500)
+            }
+            onNotificationConsumed()
+            message = "Der Eintrag ist noch nicht verfügbar. Bitte Synchronisierung prüfen."
         }
     }
     fun newCaptureUri(video: Boolean = false): Uri {
@@ -426,7 +459,10 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                                 try {
                                     val incoming = BriefstudioTransfer.fetchSaved(context)
                                     var imported = 0
-                                    for (document in incoming) if (repo.importBriefstudio(document)) imported++
+                                    for (document in incoming) if (repo.importBriefstudio(document)) {
+                                        imported++
+                                        BriefstudioNotificationWorker.notifyImported(context, document)
+                                    }
                                     message = if (imported > 0) "$imported neue Texte übernommen. Im Kalender ansehen."
                                         else "Synchronisiert: Keine neuen Texte."
                                 } catch (e: Exception) { error(e) }
@@ -500,7 +536,10 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                     var imported = 0
                     var skipped = 0
                     for (document in incoming) {
-                        if (repo.importBriefstudio(document)) imported++ else skipped++
+                        if (repo.importBriefstudio(document)) {
+                            imported++
+                            BriefstudioNotificationWorker.notifyImported(context, document)
+                        } else skipped++
                     }
                     connectionEstablished = true
                     message = "Briefstudio verbunden. $imported übernommen, $skipped bereits vorhanden. Neue Texte werden beim Entsperren automatisch geholt."
