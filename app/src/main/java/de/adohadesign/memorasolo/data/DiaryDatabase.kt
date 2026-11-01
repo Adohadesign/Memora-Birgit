@@ -9,7 +9,7 @@ data class Entry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val entryDate: String,
     val displayTime: String,
-    val title: String = "Eintrag",
+    @ColumnInfo(defaultValue = "'Eintrag'") val title: String = "Eintrag",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val isOpen: Boolean = true
