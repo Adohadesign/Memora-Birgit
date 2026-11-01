@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingMode = intent.getStringExtra("start_mode") ?: ""
+        pendingBriefstudioId = intent.getStringExtra("briefstudio_document_id")
     }
     override fun onStart() {
         super.onStart()
