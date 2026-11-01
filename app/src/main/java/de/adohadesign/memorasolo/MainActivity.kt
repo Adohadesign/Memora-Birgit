@@ -260,6 +260,8 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
     var showCalendar by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showBriefstudioLogin by remember { mutableStateOf(false) }
+    var titlePromptEntry by remember { mutableStateOf<Long?>(null) }
+    var titlePromptText by remember { mutableStateOf("") }
     var connectionEstablished by remember { mutableStateOf(BriefstudioTransfer.isConnected(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(connectionEstablished) {
@@ -320,7 +322,14 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
         val origin = MediaTarget(mediaTargetDate ?: selectedDate, mediaTargetTime ?: repo.timeNow(), mediaTargetEntry ?: selectedEntry)
         scope.launch {
             busy = true
-            try { repo.addFile(origin.date, uri, type, origin.existingId, origin.time, cameraCapture = type == "PHOTO" && cleanup != null); message = "Datei hinzugefügt" }
+            try {
+                val elementId = repo.addFile(origin.date, uri, type, origin.existingId, origin.time, cameraCapture = type == "PHOTO" && cleanup != null)
+                if (origin.existingId == null) {
+                    titlePromptEntry = repo.dao.element(elementId)?.entryId
+                    titlePromptText = ""
+                }
+                message = "Datei hinzugefügt"
+            }
             catch (e: Exception) { error(e) }
             finally { cleanup?.delete(); busy = false }
         }
@@ -357,6 +366,10 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
         scope.launch {
             try {
                 val id = repo.addText(selectedDate, if (dictate) "DICTATION" else "TEXT", selectedEntry)
+                if (selectedEntry == null) {
+                    titlePromptEntry = repo.dao.element(id)?.entryId
+                    titlePromptText = ""
+                }
                 editTextId = id
                 showAdd = false
             } catch (e: Exception) { error(e) }
@@ -447,6 +460,35 @@ private fun MemoraHome(repo: DiaryRepository, security: PatternSecurity, archive
                 selectedDate = repo.today(); selectedEntry = null; editTextId = null; showCalendar = false; showSettings = false
             }, icon = { Icon(Icons.Default.Today, "Jetzt") }, label = { Text("Jetzt") })
         }
+    }
+    if (titlePromptEntry != null) {
+        val target = titlePromptEntry!!
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Überschrift für diesen Eintrag") },
+            text = {
+                Column {
+                    Text("Jeder Eintrag erhält eine Überschrift. Sie erscheint im Kalender und in der Tagesübersicht.")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = titlePromptText,
+                        onValueChange = { titlePromptText = it.take(120) },
+                        label = { Text("Überschrift") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        try {
+                            repo.renameEntry(target, titlePromptText.trim().ifBlank { "Eintrag vom ${selectedDate}" })
+                            titlePromptEntry = null
+                        } catch (e: Exception) { error(e) }
+                    }
+                }) { Text("Speichern") }
+            }
+        )
     }
     if (showBriefstudioLogin) {
         BriefstudioLoginDialog(onDismiss = { showBriefstudioLogin = false }, onImport = { email, password ->
@@ -571,7 +613,8 @@ private fun EntryCard(entry: Entry, onOpen: (Long) -> Unit) {
                 Spacer(Modifier.width(7.dp))
                 Icon(Icons.Default.ChevronRight, "Öffnen", tint = Muted)
             }
-            Text(preview, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 15.sp)
+            Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(preview, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Muted)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (elements.any { it.type == "TEXT" || it.type == "DICTATION" }) CaptionIcon(Icons.Default.Notes, "Text")
                 if (photos > 0) CaptionIcon(Icons.Default.Photo, "$photos Fotos")
@@ -652,15 +695,19 @@ private fun EntryPage(repo: DiaryRepository, entryId: Long,
     val scope = rememberCoroutineScope()
     var entry by remember(entryId) { mutableStateOf<Entry?>(null) }
     var chooseMerge by remember { mutableStateOf(false) }
+    var renameTitle by remember { mutableStateOf(false) }
+    var editedTitle by remember { mutableStateOf("") }
     var choosingMove by remember { mutableStateOf<DiaryElement?>(null) }
     LaunchedEffect(entryId, elements) { entry = dao.entry(entryId) }
     Column {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(entry?.let { "${formatDate(it.entryDate)}, ${it.displayTime} Uhr" } ?: "Eintrag", modifier = Modifier.weight(1f), color = Gold)
+            IconButton(onClick = { editedTitle = entry?.title.orEmpty(); renameTitle = true }) { Icon(Icons.Default.Title, "Überschrift bearbeiten", tint = Gold) }
             IconButton(onClick = onChangeDateTime) { Icon(Icons.Default.EditCalendar, "Datum und Uhrzeit", tint = Gold) }
             IconButton(onClick = { chooseMerge = true }) { Icon(Icons.Default.MergeType, "Einträge zusammenführen", tint = Muted) }
             IconButton(onClick = onDelete) { Icon(Icons.Default.DeleteForever, "Eintrag löschen", tint = Color(0xFFF2B8B5)) }
         }
+        Text(entry?.title ?: "Eintrag", modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         LazyColumn(contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(elements, key = { it.id }) { element ->
                 Column {
@@ -675,6 +722,19 @@ private fun EntryPage(repo: DiaryRepository, entryId: Long,
                 }
             }
         }
+    }
+    if (renameTitle) {
+        AlertDialog(onDismissRequest = { renameTitle = false },
+            title = { Text("Überschrift bearbeiten") },
+            text = { OutlinedTextField(value = editedTitle, onValueChange = { editedTitle = it.take(120) },
+                label = { Text("Überschrift") }, singleLine = true) },
+            confirmButton = { TextButton(onClick = {
+                scope.launch {
+                    try { repo.renameEntry(entryId, editedTitle); entry = dao.entry(entryId); renameTitle = false }
+                    catch (e: Exception) { onMessage(e.message ?: "Überschrift konnte nicht gespeichert werden") }
+                }
+            }) { Text("Speichern") } },
+            dismissButton = { TextButton(onClick = { renameTitle = false }) { Text("Abbrechen") } })
     }
     if (chooseMerge) {
         val all by remember(entry?.entryDate) { repo.entries(entry?.entryDate ?: repo.today()) }.collectAsState(initial = emptyList())
