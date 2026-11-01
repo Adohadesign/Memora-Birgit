@@ -11,8 +11,8 @@ android {
         applicationId = "de.adohadesign.memorasolo"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.3"
+        versionCode = 9
+        versionName = "0.2.4"
     }
     val keyPath = System.getenv("MEMORA_KEYSTORE_PATH")
     if (!keyPath.isNullOrBlank()) {
