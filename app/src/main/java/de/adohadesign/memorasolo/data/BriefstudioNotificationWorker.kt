@@ -79,6 +79,26 @@ class BriefstudioNotificationWorker(context: Context, params: WorkerParameters):
                 "briefstudio_pending_check", ExistingPeriodicWorkPolicy.KEEP, request)
         }
 
+        fun notifyImported(context: Context, document: BriefstudioDocument) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Briefstudio-Übertragung", NotificationManager.IMPORTANCE_DEFAULT))
+            val intent = Intent(context, de.adohadesign.memorasolo.MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("briefstudio_document_id", document.id)
+            }
+            val pendingIntent = PendingIntent.getActivity(context, document.id.hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            manager.notify(document.id.hashCode(), NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setContentTitle("Tagebucheintrag angekommen")
+                .setContentText(document.title.trim().ifBlank { "Neuer Tagebucheintrag" }.take(120))
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build())
+        }
+
         fun clearForImported(context: Context, documentId: String) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.cancel(documentId.hashCode())
