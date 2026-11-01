@@ -98,6 +98,8 @@ interface DiaryDao {
     @Insert suspend fun insertAsset(asset: FileAsset): Long
     @Query("SELECT COUNT(*) FROM imported_briefstudio_documents WHERE documentId = :id")
     suspend fun importedCount(id: String): Int
+    @Query("SELECT entryId FROM imported_briefstudio_documents WHERE documentId = :id LIMIT 1")
+    suspend fun importedEntryId(id: String): Long?
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun recordImport(item: ImportedBriefstudioDocument): Long
     @Update suspend fun updateEntry(entry: Entry)
