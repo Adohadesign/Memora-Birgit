@@ -22,12 +22,13 @@ class OfflineDictation(private val context: Context, private val onChunk: (Strin
 
     fun available(): Boolean = SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
-    fun start() {
-        if (!available()) { onState("Keine Offline-Spracherkennung auf diesem Gerät verfügbar"); return }
+    fun start(): Boolean {
+        if (!available()) { onState("Offline-Spracherkennung fehlt. Bitte deutsche Sprachdaten auf dem Handy installieren."); return false }
         paused = false
         running = true
         retries = 0
         launch()
+        return running
     }
     private fun launch() {
         if (!running || paused) return
@@ -42,10 +43,15 @@ class OfflineDictation(private val context: Context, private val onChunk: (Strin
             override fun onError(error: Int) {
                 if (!running || paused) return
                 partial = ""
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                    stop()
+                    onState("Offline-Diktat nicht verfügbar (Fehler $error). Mikrofonberechtigung und deutsche Sprachdaten prüfen.")
+                    return
+                }
                 retries++
                 if (retries > 8) {
                     stop()
-                    onState("Spracherkennung angehalten. Bitte erneut starten.")
+                    onState("Spracherkennung angehalten (Fehler $error). Bitte Mikrofon und Offline-Sprachpaket prüfen.")
                 } else {
                     // Repeated short sessions prevent the recognizer's built-in timeout
                     handler.postDelayed({ launch() }, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1_200 else 500)
