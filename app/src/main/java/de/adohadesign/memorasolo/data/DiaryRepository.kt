@@ -54,6 +54,18 @@ class DiaryRepository(private val context: Context) {
         dao.insertElement(DiaryElement(entryId = id, type = type, position = dao.nextPosition(id)))
     }
 
+    /** Never overwrite an existing diary entry when importing a Briefstudio document. */
+    suspend fun importBriefstudio(document: BriefstudioDocument): Boolean = db.withTransaction {
+        if (dao.importedCount(document.id) > 0) return@withTransaction false
+        val day = LocalDate.parse(document.date).toString()
+        val time = LocalTime.parse(document.time).format(DateTimeFormatter.ofPattern("HH:mm"))
+        val entryId = dao.insertEntry(Entry(entryDate = day, displayTime = time, isOpen = false))
+        val text = if (document.title.isBlank()) document.body else "${document.title}\n\n${document.body}"
+        dao.insertElement(DiaryElement(entryId = entryId, type = "TEXT", position = 1, text = text))
+        check(dao.recordImport(ImportedBriefstudioDocument(document.id, entryId)) != -1L) { "Import bereits vorhanden" }
+        true
+    }
+
     suspend fun saveText(elementId: Long, text: String) {
         val old = dao.element(elementId) ?: return
         dao.updateElement(old.copy(text = text, updatedAt = System.currentTimeMillis()))
