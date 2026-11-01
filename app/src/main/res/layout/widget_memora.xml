@@ -1,0 +1,13 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="horizontal" android:background="#1C2029" android:padding="10dp">
+    <TextView android:id="@+id/widget_text" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="match_parent" android:gravity="center" android:text="✎ Text"
+        android:textColor="#C5A66D" android:textSize="17sp" />
+    <TextView android:id="@+id/widget_voice" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="match_parent" android:gravity="center" android:text="🎙 Diktat"
+        android:textColor="#C5A66D" android:textSize="17sp" />
+    <TextView android:id="@+id/widget_photo" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="match_parent" android:gravity="center" android:text="▣ Foto"
+        android:textColor="#C5A66D" android:textSize="17sp" />
+</LinearLayout>

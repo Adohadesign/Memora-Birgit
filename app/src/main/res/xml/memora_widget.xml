@@ -1,0 +1,5 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp" android:minHeight="65dp"
+    android:initialLayout="@layout/widget_memora"
+    android:resizeMode="horizontal" android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0" />
